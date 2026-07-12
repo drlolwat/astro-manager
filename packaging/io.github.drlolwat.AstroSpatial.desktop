@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Astro Spatial
+GenericName=Headphone Surround Controller
+Comment=Binaural 5.1/7.1 and direct stereo for the Astro A50
+Exec=astro-spatial
+Icon=audio-headphones
+Terminal=false
+Categories=AudioVideo;Audio;Settings;
+Keywords=Astro;A50;surround;binaural;PipeWire;
+StartupNotify=true
+
