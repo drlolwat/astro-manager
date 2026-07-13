@@ -1,0 +1,14 @@
+[Unit]
+Description=Astro Manager for Linux
+After=pipewire.service wireplumber.service graphical-session.target
+Wants=pipewire.service wireplumber.service
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/astro-manager --background
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

@@ -1,108 +1,167 @@
-# Astro Spatial
+# Astro Manager for Linux
 
-Open-source binaural 5.1/7.1 virtualization for the Astro A50 on PipeWire.
+An open-source Astro A50 Gen 4 control center and binaural surround manager for
+Arch Linux, CachyOS, PipeWire, and KDE Plasma.
 
-Astro Spatial is a CachyOS/Arch desktop controller for an Astro A50 dock. It creates a real PipeWire 5.1 or 7.1 sink, spatializes each speaker with a SOFA HRTF, and sends the resulting stereo signal to either **A50 Chat** or **A50 Game**. It also provides a direct stereo mode with no application DSP.
+Astro Manager combines native dock/headset controls with the existing Astro
+Spatial 5.1/7.1 HRTF pipeline. It can route direct or spatialized program audio
+to either **A50 Chat** or **A50 Game**; Chat remains the default. Spatial audio
+defaults to the bass-forward **Bass Heavy** Linux EQ.
 
-Surround defaults to the **Bass Heavy** equalizer: a strong low shelf and sub-bass lift combined with reduced upper-mid/treble energy. **Balanced Warm** and **Flat / EQ Off** are available in the GUI. EQ runs before the true-peak limiter.
+This is conventional multichannel PCM virtualization, not a Dolby Atmos object
+decoder. It provides the headphone result people generally want from Atmos for
+Headphones without accepting proprietary Atmos metadata.
 
-This is binaural virtualization for conventional multichannel PCM. It is not a Dolby Atmos decoder and does not consume proprietary Atmos object metadata.
+## Current hardware scope
+
+The supported device is the Astro A50 Gen 4 base station with USB ID
+`9886:002c`. The native manager uses only HID interface 6; the USB audio
+interfaces remain owned by PipeWire/ALSA.
+
+Firmware versions are readable. **Firmware flashing is not implemented** because
+the update bootloader, recovery process, and firmware container have not been
+safely decoded.
 
 ## Features
 
-- Real 5.1 and 7.1 PipeWire sinks for games and media players
-- SOFA/KEMAR HRTF spatialization to stereo headphones
-- Selectable A50 Chat or A50 Game physical output
-- Bass Heavy, Balanced Warm, and Flat equalizer presets
+- Battery, charging, headset-on, and docked status
+- Base and headset firmware versions
+- All three onboard EQ slots, names, and five bands
+- Microphone level, sidetone, noise gate, and microphone EQ
+- Stream Port Mix for Mic, Chat, Game, and Aux
+- Live and startup Game/Voice balance
+- Live preview with explicit **Save to Headset** and **Revert**
+- Named unified profiles with versioned JSON import/export
+- Real PipeWire 5.1 and 7.1 sinks with SOFA/KEMAR HRTF processing
+- Selectable A50 Chat or A50 Game physical destination
+- Bass Heavy, Balanced Warm, and Flat Linux EQ presets
 - LFE filtering, latency alignment, and true-peak limiting
-- Direct stereo mode without application DSP
-- KDE/Kirigami controller, tray integration, channel tests, and reconnect restoration
-- Communication-role stream exclusion so voice chat and the microphone stay outside the surround DSP
+- Direct Stereo without application DSP
+- KDE/Kirigami GUI, tray, systemd user service, D-Bus API, and CLI
+- Channel tests, reconnect restoration, and host-side lossless checks
+
+## Linux EQ priority
+
+When Linux 5.1/7.1 processing is active, Astro Manager temporarily runs the
+active onboard output EQ with zero gain. The user's real onboard preset remains
+in memory and is restored in Direct mode or when the service exits cleanly.
+Temporary neutralization never invokes the headset save command.
+
+Before neutralizing, the manager writes a recovery journal under
+`~/.local/state/astro-manager/`. If the process or desktop crashes, the next
+launch recovers the desired gains only when both firmware versions still match.
+
+Saving while spatial mode is active restores the desired values, sends one
+headset save command, verifies the persistent values, and reapplies temporary
+neutralization.
 
 ## Requirements
 
-- CachyOS or Arch Linux with PipeWire and WirePlumber 0.5
-- KDE Plasma/Wayland with Qt 6 and Kirigami
-- Astro A50 dock exposed as USB device `9886:002c`
+- Arch Linux or CachyOS with PipeWire and WirePlumber 0.5
+- Qt 6 and Kirigami 6
+- libusb 1.0
 - `libmysofa` and `lsp-plugins-lv2`
-
-Install the build and runtime dependencies:
+- Astro A50 Gen 4 dock in PC mode
 
 ```bash
 sudo pacman -S --needed cmake ninja qt6-base qt6-declarative kirigami \
-  pipewire pipewire-audio pipewire-pulse wireplumber libmysofa lsp-plugins-lv2
+  pipewire pipewire-audio pipewire-pulse wireplumber libusb libmysofa \
+  lsp-plugins-lv2
 ```
 
-## Build and run
-
-Clone the repository:
+## Build and install
 
 ```bash
-git clone https://github.com/drlolwat/astro-spatial.git
-cd astro-spatial
-```
-
-Build and test:
-
-```bash
+git clone https://github.com/drlolwat/astro-manager.git
+cd astro-manager
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build --output-on-failure
-./build/src/astro-spatial
-```
-
-Modes may also be selected without opening the window:
-
-```bash
-astro-spatial --background --output chat --mode 7.1
-astro-spatial --background --output game --mode direct
-```
-
-To install it system-wide:
-
-```bash
 sudo cmake --install build
+systemctl --user enable --now astro-manager.service
 ```
 
-The first launch creates:
+Reload the udev rule and reconnect the dock after the first install:
 
-- `~/.config/astro-spatial/filter-chain.conf` when surround is selected
-- `~/.config/systemd/user/astro-spatial-dsp.service`
-- `~/.config/autostart/io.github.drlolwat.AstroSpatial.desktop`
+```bash
+sudo udevadm control --reload-rules
+```
 
-No root privileges are used at runtime.
+The `astro-spatial` command remains as a compatibility alias during the 1.x
+series. Existing mode, output, HRTF, and Linux EQ preferences migrate
+automatically.
 
 ## Use
 
 1. Put the dock in PC mode.
-2. Select **A50 Chat** (the first-run default) or **A50 Game** as the physical destination.
-3. Select Direct Stereo, Spatial 5.1, or Spatial 7.1.
-4. For surround, set the headset's Dolby button to white-star/source-passthrough mode to prevent double spatialization.
-5. Use the channel calibration buttons to confirm direction.
+2. Open **Astro Manager for Linux**.
+3. Select **A50 Chat** or **A50 Game** on the Spatial Audio page.
+4. Select Direct Stereo, Spatial 5.1, or Spatial 7.1.
+5. For spatial modes, set the headset Dolby button to white-star/source
+   passthrough to prevent double spatialization.
+6. Adjust hardware controls freely. Use **Save to Headset** only when the
+   preview should survive a dock power cycle.
 
-Communication-role playback streams are excluded from automatic DSP moves, and the microphone is never processed. If A50 Chat is selected, spatialized program audio and untouched communication audio may share the physical Chat endpoint.
+The background service keeps device monitoring, spatial routing, physical
+button synchronization, and EQ restoration active with the window closed.
+
+## CLI
+
+```bash
+astro-managerctl status
+astro-managerctl output chat
+astro-managerctl mode 7.1
+astro-managerctl refresh
+astro-managerctl profile PROFILE_UUID
+astro-managerctl capture "My profile"
+astro-managerctl delete-profile PROFILE_UUID
+astro-managerctl save
+astro-managerctl revert
+```
+
+Legacy commands also work:
+
+```bash
+astro-spatial --background --output chat --mode 7.1
+```
 
 ## Lossless boundary
 
-The observed A50 endpoints accept stereo S16LE at 48 kHz. Direct mode stops the Astro Spatial service, targets the selected hardware endpoint, and sets its PipeWire volume to unity. A 48 kHz/16-bit source can therefore remain bit-identical through the Linux software conversion path. Other rates or bit depths require conversion.
+The observed A50 playback endpoints accept stereo S16LE at 48 kHz. Direct mode
+stops the HRTF service, targets the selected physical endpoint, and sets its
+PipeWire volume to unity. A 48 kHz/16-bit source can therefore remain
+bit-identical through the host-side Linux conversion path. Other rates or bit
+depths require conversion.
 
-Surround is intentionally not bit-perfect: it performs HRTF convolution, LFE filtering, mixing, true-peak limiting, and final 16-bit dithering. The proprietary radio link and onboard headset processing after the USB dock cannot be inspected by Linux, so the application does not claim end-to-end wireless losslessness.
+Hardware EQ and proprietary processing occur after the USB boundary. The radio
+link between dock and headset cannot be inspected by Linux. Astro Manager never
+claims that the complete wireless path is proven bit-perfect.
+
+Spatial modes intentionally change samples through HRTF convolution, LFE
+filtering, mixing, EQ, limiting, and final format conversion.
 
 ## Troubleshooting
 
-Inspect the DSP service with:
-
 ```bash
-systemctl --user status astro-spatial-dsp
-journalctl --user -u astro-spatial-dsp -b
+systemctl --user status astro-manager.service
+systemctl --user status astro-manager-dsp.service
+journalctl --user -u astro-manager.service -b
 wpctl status
+astro-managerctl status
 ```
 
-Returning to Direct Stereo stops the DSP service and routes eligible playback streams back to the selected physical endpoint.
+If hardware controls report a permission error, reconnect the dock after
+installing `60-astro-manager.rules`. If another manager owns interface 6, close
+it before starting Astro Manager.
 
-## Current hardware scope
+## Protocol credit
 
-The initial release matches the Astro A50 dock with USB vendor/product ID `9886:002c` and PipeWire's standard `stereo-chat` / `stereo-game` node names. Other A50 generations may expose different identifiers and are not yet automatically detected.
+The Gen 4 command framing and decoded settings are based on the MIT-licensed
+[tdryer/eh-fifty](https://github.com/tdryer/eh-fifty) project. The implementation
+here is a native C++/libusb port with additional validation, state separation,
+runtime EQ neutralization, recovery, UI, profiles, and PipeWire integration.
+
+See [NOTICE](NOTICE) for attribution.
 
 ## License
 

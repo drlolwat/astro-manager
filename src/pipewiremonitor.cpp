@@ -224,6 +224,7 @@ int PipeWireMonitor::moveEligiblePlaybackStreams(const QString &nodeName, QStrin
         if (mediaClass == QLatin1String("Stream/Output/Audio")
             && !isCommunicationRole(role)
             && application != QLatin1String("Astro Spatial")
+            && application != QLatin1String("Astro Manager for Linux")
             && nodeName != QLatin1String(SpatialOutputNode)) {
             const auto id = wp_proxy_get_bound_id(WP_PROXY(object));
             if (id != G_MAXUINT32) {

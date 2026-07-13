@@ -7,6 +7,29 @@ target_link_libraries(profilegenerator-test PRIVATE
 )
 add_test(NAME profilegenerator-test COMMAND profilegenerator-test)
 
+qt_add_executable(a50protocol-test
+    a50protocol_test.cpp
+)
+target_link_libraries(a50protocol-test PRIVATE
+    astro-spatial-core
+    Qt6::Test
+)
+add_test(NAME a50protocol-test COMMAND a50protocol-test)
+
+qt_add_executable(profilestore-test
+    profilestore_test.cpp
+)
+target_link_libraries(profilestore-test PRIVATE
+    astro-spatial-core
+    Qt6::Test
+)
+add_test(NAME profilestore-test COMMAND profilestore-test)
+
+qt_add_executable(a50dump
+    a50dump.cpp
+)
+target_link_libraries(a50dump PRIVATE astro-spatial-core Qt6::Core)
+
 qt_add_executable(configdump
     configdump.cpp
 )

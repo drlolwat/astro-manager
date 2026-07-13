@@ -15,7 +15,7 @@ jobs:
           pacman -Syu --noconfirm --needed
           base-devel cmake ninja pkgconf
           qt6-base qt6-declarative kirigami
-          pipewire wireplumber
+          pipewire wireplumber libusb
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
       - name: Build

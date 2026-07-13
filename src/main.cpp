@@ -5,6 +5,7 @@
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QIcon>
+#include <QJsonDocument>
 #include <QMenu>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -16,7 +17,7 @@ using AstroSpatial::AppController;
 class ApplicationBridge : public QObject
 {
     Q_OBJECT
-    Q_CLASSINFO("D-Bus Interface", "io.github.drlolwat.AstroSpatial.Application")
+    Q_CLASSINFO("D-Bus Interface", "io.github.drlolwat.AstroManager1")
 
 public:
     ApplicationBridge(QWindow *window, AppController *controller, QObject *parent = nullptr)
@@ -24,6 +25,7 @@ public:
         , m_window(window)
         , m_controller(controller)
     {
+        connect(m_controller, &AppController::stateChanged, this, &ApplicationBridge::StateChanged);
     }
 
 public slots:
@@ -48,6 +50,53 @@ public slots:
             m_controller->selectOutputEndpoint(endpoint);
     }
 
+    QVariantMap State() const
+    {
+        if (!m_controller)
+            return {};
+        QVariantMap device = m_controller->hardwareManager()->state();
+        device.insert(QStringLiteral("busy"), m_controller->hardwareManager()->busy());
+        device.insert(QStringLiteral("error"), m_controller->hardwareManager()->errorMessage());
+        return {
+            {QStringLiteral("audio"), QVariantMap{
+                {QStringLiteral("connected"), m_controller->connected()},
+                {QStringLiteral("mode"), m_controller->mode()},
+                {QStringLiteral("outputEndpoint"), m_controller->outputEndpoint()},
+                {QStringLiteral("profileId"), m_controller->profileId()},
+                {QStringLiteral("eqPresetId"), m_controller->eqPresetId()},
+                {QStringLiteral("status"), m_controller->statusTitle()},
+                {QStringLiteral("detail"), m_controller->statusDetail()},
+            }},
+            {QStringLiteral("device"), device},
+            {QStringLiteral("profiles"), m_controller->savedProfiles()},
+        };
+    }
+
+    QString StateJson() const
+    {
+        return QString::fromUtf8(QJsonDocument::fromVariant(State()).toJson(QJsonDocument::Indented));
+    }
+
+    void RefreshHardware() { if (m_controller) m_controller->hardwareManager()->refresh(); }
+    void SaveToHeadset() { if (m_controller) m_controller->hardwareManager()->saveToHeadset(); }
+    void RevertToSaved() { if (m_controller) m_controller->hardwareManager()->revertToSaved(); }
+    void ApplyProfile(const QString &id) { if (m_controller) m_controller->applyUnifiedProfile(id); }
+    void CreateProfile(const QString &name) { if (m_controller) m_controller->createUnifiedProfile(name); }
+    void DeleteProfile(const QString &id) { if (m_controller) m_controller->deleteUnifiedProfile(id); }
+    void SetActiveEqPreset(int preset) { if (m_controller) m_controller->hardwareManager()->setActiveEqPreset(preset); }
+    void SetEqPresetName(int preset, const QString &name) { if (m_controller) m_controller->hardwareManager()->setEqPresetName(preset, name); }
+    void SetEqGain(int preset, int band, int gain) { if (m_controller) m_controller->hardwareManager()->setEqGain(preset, band, gain); }
+    void SetEqBand(int preset, int band, int frequency, double bandwidth) { if (m_controller) m_controller->hardwareManager()->setEqBand(preset, band, frequency, bandwidth); }
+    void SetSlider(int slider, int value) { if (m_controller) m_controller->hardwareManager()->setSlider(slider, value); }
+    void SetNoiseGate(int mode) { if (m_controller) m_controller->hardwareManager()->setNoiseGate(mode); }
+    void SetMicrophoneEq(int preset) { if (m_controller) m_controller->hardwareManager()->setMicrophoneEq(preset); }
+    void SetAlertVolume(int value) { if (m_controller) m_controller->hardwareManager()->setAlertVolume(value); }
+    void SetDefaultBalance(int value) { if (m_controller) m_controller->hardwareManager()->setDefaultBalance(value); }
+    void AuditionHardwareEq(bool enabled) { if (m_controller) m_controller->hardwareManager()->auditionHardwareEq(enabled); }
+
+signals:
+    void StateChanged();
+
 private:
     QWindow *m_window = nullptr;
     AppController *m_controller = nullptr;
@@ -56,14 +105,14 @@ private:
 int main(int argc, char *argv[])
 {
     QApplication application(argc, argv);
-    QApplication::setApplicationName(QStringLiteral("Astro Spatial"));
-    QApplication::setApplicationVersion(QStringLiteral("0.1.0"));
-    QApplication::setOrganizationName(QStringLiteral("AstroSpatial"));
-    QApplication::setDesktopFileName(QStringLiteral("io.github.drlolwat.AstroSpatial"));
+    QApplication::setApplicationName(QStringLiteral("Astro Manager for Linux"));
+    QApplication::setApplicationVersion(QStringLiteral("0.4.0"));
+    QApplication::setOrganizationName(QStringLiteral("AstroSpatial")); // Preserve 0.1 settings.
+    QApplication::setDesktopFileName(QStringLiteral("io.github.drlolwat.AstroManager"));
     QApplication::setQuitOnLastWindowClosed(false);
 
     QCommandLineParser parser;
-    parser.setApplicationDescription(QStringLiteral("Binaural surround controller for the Astro A50"));
+    parser.setApplicationDescription(QStringLiteral("A50 Gen 4 device and spatial-audio manager"));
     parser.addHelpOption();
     parser.addVersionOption();
     const QCommandLineOption backgroundOption(
@@ -81,11 +130,11 @@ int main(int argc, char *argv[])
     parser.addOption(outputOption);
     parser.process(application);
 
-    constexpr auto serviceName = "io.github.drlolwat.AstroSpatial";
+    constexpr auto serviceName = "io.github.drlolwat.AstroManager";
     auto bus = QDBusConnection::sessionBus();
     if (!bus.registerService(QString::fromLatin1(serviceName))) {
         QDBusInterface existing(QString::fromLatin1(serviceName), QStringLiteral("/Application"),
-                                QStringLiteral("io.github.drlolwat.AstroSpatial.Application"), bus);
+                                QStringLiteral("io.github.drlolwat.AstroManager1"), bus);
         if (parser.isSet(outputOption)) {
             const QString output = parser.value(outputOption).toLower();
             existing.call(QStringLiteral("SetOutput"), output == QLatin1String("game") ? 1 : 0);
@@ -120,7 +169,8 @@ int main(int argc, char *argv[])
     }
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("controller"), &controller);
-    engine.loadFromModule(QStringLiteral("AstroSpatial"), QStringLiteral("Main"));
+    engine.rootContext()->setContextProperty(QStringLiteral("hardware"), controller.hardwareManager());
+    engine.loadFromModule(QStringLiteral("AstroManager"), QStringLiteral("Main"));
     if (engine.rootObjects().isEmpty())
         return 1;
 
@@ -132,12 +182,13 @@ int main(int argc, char *argv[])
 
     ApplicationBridge bridge(window, &controller);
     bus.registerObject(QStringLiteral("/Application"), &bridge,
-                       QDBusConnection::ExportAllSlots);
+                       QDBusConnection::ExportAllSlots | QDBusConnection::ExportAllSignals);
+    bus.registerService(QStringLiteral("io.github.drlolwat.AstroSpatial")); // 0.1 compatibility alias.
 
     QSystemTrayIcon tray(QIcon::fromTheme(QStringLiteral("audio-headphones")), &application);
-    tray.setToolTip(QStringLiteral("Astro Spatial"));
+    tray.setToolTip(QStringLiteral("Astro Manager for Linux"));
     QMenu trayMenu;
-    auto *showAction = trayMenu.addAction(QStringLiteral("Open Astro Spatial"));
+    auto *showAction = trayMenu.addAction(QStringLiteral("Open Astro Manager"));
     QObject::connect(showAction, &QAction::triggered, &bridge, &ApplicationBridge::Show);
     trayMenu.addSeparator();
     auto *directAction = trayMenu.addAction(QStringLiteral("Switch to Direct Stereo"));

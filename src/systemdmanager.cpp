@@ -12,7 +12,8 @@
 namespace AstroSpatial {
 namespace {
 
-constexpr auto UnitName = "astro-spatial-dsp.service";
+constexpr auto UnitName = "astro-manager-dsp.service";
+constexpr auto LegacyUnitName = "astro-spatial-dsp.service";
 
 QDBusInterface managerInterface()
 {
@@ -50,7 +51,7 @@ bool SystemdManager::installUserUnit(const QString &configPath, QString *error)
     }
 
     const QString unit = QStringLiteral(R"([Unit]
-Description=Astro Spatial PipeWire DSP
+Description=Astro Manager PipeWire DSP
 After=pipewire.service wireplumber.service
 Wants=pipewire.service wireplumber.service
 
@@ -98,18 +99,30 @@ bool SystemdManager::callUnitMethod(const QString &method, QString *error)
 
 bool SystemdManager::start(QString *error)
 {
+    auto manager = managerInterface();
+    manager.call(QStringLiteral("StopUnit"), QString::fromLatin1(LegacyUnitName), QStringLiteral("replace"));
     return callUnitMethod(QStringLiteral("StartUnit"), error);
 }
 
 bool SystemdManager::stop(QString *error)
 {
-    return callUnitMethod(QStringLiteral("StopUnit"), error);
+    const bool stopped = callUnitMethod(QStringLiteral("StopUnit"), error);
+    auto manager = managerInterface();
+    manager.call(QStringLiteral("StopUnit"), QString::fromLatin1(LegacyUnitName), QStringLiteral("replace"));
+    return stopped;
 }
 
 bool SystemdManager::restart(QString *error)
 {
-    return callUnitMethod(QStringLiteral("RestartUnit"), error);
+    auto manager = managerInterface();
+    manager.call(QStringLiteral("StopUnit"), QString::fromLatin1(LegacyUnitName), QStringLiteral("replace"));
+    const bool restarted = callUnitMethod(QStringLiteral("RestartUnit"), error);
+    if (restarted) {
+        QFile::remove(QDir::homePath() + QStringLiteral("/.config/systemd/user/")
+                      + QString::fromLatin1(LegacyUnitName));
+        daemonReload(nullptr);
+    }
+    return restarted;
 }
 
 } // namespace AstroSpatial
-

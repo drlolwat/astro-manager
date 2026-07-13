@@ -1,0 +1,11 @@
+Astro Manager for Linux
+
+The Astro A50 Gen 4 USB protocol implementation is derived from protocol
+documentation and behavior in eh-fifty by Thomas Dryer:
+https://github.com/tdryer/eh-fifty
+
+eh-fifty is distributed under the MIT License. Copyright (c) 2024 Thomas Dryer.
+No Logitech or Astro firmware is included or redistributed by this project.
+
+Astro, A50, Dolby, Logitech, and related marks belong to their respective
+owners. This project is independent and is not endorsed by Logitech or Dolby.

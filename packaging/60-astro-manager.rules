@@ -1,0 +1,3 @@
+# Astro A50 Gen 4 control interface. Access follows the active desktop session.
+SUBSYSTEM=="usb", ATTR{idVendor}=="9886", ATTR{idProduct}=="002c", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="9886", ATTRS{idProduct}=="002c", TAG+="uaccess"

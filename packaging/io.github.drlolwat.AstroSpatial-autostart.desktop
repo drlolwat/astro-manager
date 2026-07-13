@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Astro Spatial Controller
-Comment=Restore the selected Astro A50 audio path
-Exec=astro-spatial --background
-Icon=audio-headphones
-Terminal=false
-X-KDE-autostart-after=panel
-X-KDE-StartupNotify=false

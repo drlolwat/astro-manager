@@ -1,0 +1,36 @@
+pkgname=astro-manager-git
+pkgver=0.4.0.r0.g0000000
+pkgrel=1
+pkgdesc='Astro A50 Gen 4 control center and binaural surround manager'
+arch=('x86_64')
+url='https://github.com/drlolwat/astro-manager'
+license=('MIT')
+depends=('qt6-base' 'qt6-declarative' 'kirigami' 'pipewire' 'wireplumber'
+         'libusb' 'libmysofa' 'lsp-plugins-lv2')
+makedepends=('git' 'cmake' 'ninja' 'pkgconf')
+provides=('astro-manager' 'astro-spatial')
+conflicts=('astro-spatial')
+source=('git+https://github.com/drlolwat/astro-manager.git')
+sha256sums=('SKIP')
+
+pkgver() {
+  cd astro-manager
+  git describe --long --tags --always | sed 's/^v//;s/-/.r/;s/-/./'
+}
+
+build() {
+  cmake -S astro-manager -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr
+  cmake --build build
+}
+
+check() {
+  QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+  install -Dm644 astro-manager/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 astro-manager/NOTICE "$pkgdir/usr/share/doc/astro-manager/NOTICE"
+}

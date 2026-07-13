@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Astro Manager for Linux
+GenericName=Astro A50 Control Center
+Comment=Manage Astro A50 hardware and binaural 5.1/7.1 audio
+Exec=astro-manager
+Icon=audio-headphones
+Terminal=false
+Categories=AudioVideo;Audio;Settings;
+Keywords=Astro;A50;surround;binaural;equalizer;microphone;PipeWire;
+StartupNotify=true

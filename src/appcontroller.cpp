@@ -1,6 +1,5 @@
 #include "appcontroller.h"
 
-#include <QCoreApplication>
 #include <QDataStream>
 #include <QDir>
 #include <QFile>
@@ -17,19 +16,13 @@ namespace {
 constexpr auto SofaPath = "/usr/share/libmysofa/default.sofa";
 constexpr auto LimiterTtl = "/usr/lib/lv2/lsp-plugins.lv2/limiter_stereo.ttl";
 
-QString shellQuotedDesktopExec(QString path)
-{
-    path.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
-    path.replace(QLatin1Char('"'), QStringLiteral("\\\""));
-    return QLatin1Char('"') + path + QLatin1Char('"');
-}
-
 } // namespace
 
 AppController::AppController(QObject *parent)
     : QObject(parent)
     , m_monitor(this)
     , m_systemd(this)
+    , m_hardware(this)
     , m_settings(QStringLiteral("AstroSpatial"), QStringLiteral("AstroSpatial"))
 {
     m_mode = modeFromKey(m_settings.value(QStringLiteral("mode"), QStringLiteral("direct")).toString());
@@ -56,6 +49,7 @@ AppController::AppController(QObject *parent)
         m_wasConnected = isConnected;
     });
     connect(&m_monitor, &PipeWireMonitor::connectionError, this, &AppController::setError);
+    connect(&m_hardware, &A50Manager::stateChanged, this, &AppController::stateChanged);
 
     QString error;
     if (!m_monitor.start(&error))
@@ -146,7 +140,7 @@ QString AppController::statusDetail() const
     if (m_busy)
         return QStringLiteral("Rebuilding and routing the PipeWire graph…");
     if (m_mode == Mode::Direct)
-        return QStringLiteral("48 kHz / 16-bit dock path, unity software volume, no Astro Spatial DSP.");
+        return QStringLiteral("48 kHz / 16-bit dock path, unity software volume, no Astro Manager DSP.");
     return QStringLiteral("32-bit float HRTF processing at 48 kHz with %1 EQ; Chat and microphone streams are not moved into DSP.")
         .arg(ProfileGenerator::equalizerPreset(m_eqPresetId).displayName);
 }
@@ -154,7 +148,7 @@ QString AppController::statusDetail() const
 QString AppController::configPath() const
 {
     return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
-        + QStringLiteral("/astro-spatial/filter-chain.conf");
+        + QStringLiteral("/astro-manager/filter-chain.conf");
 }
 
 void AppController::setError(const QString &message)
@@ -260,9 +254,10 @@ void AppController::applyCurrentMode()
 
 void AppController::activateDirect(quint64 generation)
 {
-    qInfo().noquote() << "Astro Spatial: activating Direct via" << endpointDisplayName(m_endpoint)
+    qInfo().noquote() << "Astro Manager: activating Direct via" << endpointDisplayName(m_endpoint)
                       << "generation" << generation;
     m_busy = true;
+    m_hardware.setSpatialActive(false);
     emit stateChanged();
 
     QString error;
@@ -314,7 +309,7 @@ bool AppController::writeDspConfiguration(QString *error)
 
 void AppController::activateSurround(quint64 generation)
 {
-    qInfo().noquote() << "Astro Spatial: activating" << ProfileGenerator::profile(m_profileId).displayName
+    qInfo().noquote() << "Astro Manager: activating" << ProfileGenerator::profile(m_profileId).displayName
                       << "with" << ProfileGenerator::equalizerPreset(m_eqPresetId).displayName << "EQ"
                       << "via" << endpointDisplayName(m_endpoint) << "generation" << generation;
     m_busy = true;
@@ -343,6 +338,7 @@ void AppController::waitForSpatialSink(quint64 generation, int remainingAttempts
             return;
         }
         m_monitor.moveEligiblePlaybackStreams(QString::fromLatin1(PipeWireMonitor::SpatialNode), &error);
+        m_hardware.setSpatialActive(true);
         m_busy = false;
         emit stateChanged();
         return;
@@ -351,7 +347,7 @@ void AppController::waitForSpatialSink(quint64 generation, int remainingAttempts
         QString ignored;
         m_systemd.stop(&ignored);
         m_monitor.setDefaultTarget(selectedPhysicalNode(), &ignored);
-        setError(QStringLiteral("The Astro Spatial sink did not appear. Check the user service log with: journalctl --user -u astro-spatial-dsp"));
+        setError(QStringLiteral("The Astro Manager sink did not appear. Check: journalctl --user -u astro-manager-dsp"));
         return;
     }
     QTimer::singleShot(100, this, [this, generation, remainingAttempts] {
@@ -454,34 +450,95 @@ void AppController::playChannel(const QString &channel)
     });
 }
 
+void AppController::createUnifiedProfile(const QString &name)
+{
+    m_profileError.clear();
+    if (!m_hardware.connected()) {
+        m_profileError = QStringLiteral("Connect the A50 before capturing a unified profile.");
+        emit stateChanged();
+        return;
+    }
+    const QVariantMap spatial = {
+        {QStringLiteral("mode"), modeKey(m_mode)},
+        {QStringLiteral("outputEndpoint"), endpointKey(m_endpoint)},
+        {QStringLiteral("hrtfProfile"), m_profileId},
+        {QStringLiteral("softwareEq"), m_eqPresetId},
+    };
+    QString error;
+    if (m_profileStore.create(name, spatial, m_hardware.state(), &error).isEmpty())
+        m_profileError = error;
+    emit stateChanged();
+}
+
+void AppController::applyUnifiedProfile(const QString &id)
+{
+    m_profileError.clear();
+    const auto unified = m_profileStore.profile(id);
+    if (unified.isEmpty()) {
+        m_profileError = QStringLiteral("Profile not found or invalid.");
+        emit stateChanged();
+        return;
+    }
+    const auto spatial = unified.value(QStringLiteral("spatial")).toMap();
+    m_mode = modeFromKey(spatial.value(QStringLiteral("mode")).toString());
+    m_endpoint = endpointFromKey(spatial.value(QStringLiteral("outputEndpoint")).toString());
+    m_profileId = ProfileGenerator::profile(spatial.value(QStringLiteral("hrtfProfile")).toString()).id;
+    if (ProfileGenerator::profile(m_profileId).mode != m_mode && m_mode != Mode::Direct)
+        m_profileId = ProfileGenerator::defaultProfileId(m_mode);
+    m_eqPresetId = ProfileGenerator::equalizerPreset(
+        spatial.value(QStringLiteral("softwareEq")).toString()).id;
+    saveState();
+    m_hardware.applyProfile(unified.value(QStringLiteral("hardware")).toMap());
+    emit stateChanged();
+    applyCurrentMode();
+}
+
+void AppController::deleteUnifiedProfile(const QString &id)
+{
+    QString error;
+    m_profileError.clear();
+    if (!m_profileStore.remove(id, &error))
+        m_profileError = error;
+    emit stateChanged();
+}
+
+void AppController::importUnifiedProfile(const QUrl &url)
+{
+    QString error;
+    m_profileError.clear();
+    if (!url.isLocalFile() || !m_profileStore.importFile(url.toLocalFile(), &error))
+        m_profileError = error.isEmpty() ? QStringLiteral("Choose a local Astro Manager JSON profile.") : error;
+    emit stateChanged();
+}
+
+void AppController::exportUnifiedProfile(const QString &id, const QUrl &url)
+{
+    QString error;
+    m_profileError.clear();
+    QString path = url.toLocalFile();
+    if (!path.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive))
+        path += QStringLiteral(".json");
+    if (!url.isLocalFile() || !m_profileStore.exportFile(id, path, &error))
+        m_profileError = error.isEmpty() ? QStringLiteral("Choose a local export path.") : error;
+    emit stateChanged();
+}
+
 bool AppController::ensureAutostart(QString *error)
 {
     const QString directory = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
         + QStringLiteral("/autostart");
-    if (!QDir().mkpath(directory)) {
-        if (error) *error = QStringLiteral("Could not create the autostart directory.");
-        return false;
-    }
-    const QString path = directory + QStringLiteral("/io.github.drlolwat.AstroSpatial.desktop");
     QFile::remove(directory + QStringLiteral("/io.github.jabby.AstroSpatial.desktop"));
-    const QString contents = QStringLiteral(R"([Desktop Entry]
-Type=Application
-Name=Astro Spatial
-Comment=Restore the selected Astro A50 audio path
-Exec=%1 --background
-Icon=audio-headphones
-Terminal=false
-X-KDE-autostart-after=panel
-X-KDE-StartupNotify=false
-)").arg(shellQuotedDesktopExec(QCoreApplication::applicationFilePath()));
-    QSaveFile file(path);
-    const QByteArray bytes = contents.toUtf8();
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)
-        || file.write(bytes) != bytes.size() || !file.commit()) {
-        if (error) *error = file.errorString();
-        return false;
-    }
-    return true;
+    QFile::remove(directory + QStringLiteral("/io.github.drlolwat.AstroSpatial.desktop"));
+    QFile::remove(directory + QStringLiteral("/io.github.drlolwat.AstroManager.desktop"));
+
+    const QString unit = QStringLiteral("/usr/lib/systemd/user/astro-manager.service");
+    if (!QFileInfo::exists(unit))
+        return true; // Development build; the installed package supplies the unit.
+    const int result = QProcess::execute(QStringLiteral("/usr/bin/systemctl"),
+        {QStringLiteral("--user"), QStringLiteral("enable"), QStringLiteral("astro-manager.service")});
+    if (result != 0 && error)
+        *error = QStringLiteral("Could not enable the Astro Manager background service.");
+    return result == 0;
 }
 
 } // namespace AstroSpatial
