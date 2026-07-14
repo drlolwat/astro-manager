@@ -88,15 +88,9 @@ bool A50Device::open(QString *error)
     }
     m_claimed = true;
 
-    const auto info = request(A50Command::GetDeviceInfo, {}, 1000, error);
-    if (!info || info->size() < 8
-        || readLe16(*info, 4) != A50Protocol::VendorId
-        || readLe16(*info, 6) != A50Protocol::ProductId) {
-        if (error && (info && info->size() >= 8))
-            *error = QStringLiteral("The USB control device did not identify as a supported A50 Gen 4 dock.");
-        close();
-        return false;
-    }
+    // libusb_open_device_with_vid_pid already restricts this handle to the exact
+    // supported dock. Command 0x03 is metadata, not a handshake: Gen 4 firmware
+    // rejects it while the headset is undocked and actively wireless.
     return true;
 }
 
@@ -146,7 +140,14 @@ std::optional<QByteArray> A50Device::request(A50Command command, const QByteArra
         return std::nullopt;
     }
     incoming.resize(transferred);
-    return A50Protocol::decodeResponse(incoming, error);
+    QString responseError;
+    auto decoded = A50Protocol::decodeResponse(incoming, &responseError);
+    if (!decoded && error) {
+        *error = QStringLiteral("%1 (command 0x%2)")
+            .arg(responseError)
+            .arg(static_cast<quint8>(command), 2, 16, QLatin1Char('0'));
+    }
+    return decoded;
 }
 
 bool A50Device::readDynamic(A50Snapshot *snapshot, QString *error)
@@ -320,23 +321,42 @@ bool A50Device::readSnapshot(A50Snapshot *snapshot, QString *error)
     if (!readDynamic(snapshot, error))
         return false;
 
-    const auto info = request(A50Command::GetDeviceInfo, {}, 1000, error);
-    const auto baseMinor = request(A50Command::GetBaseFirmwareMinor, {}, 1000, error);
-    if (!info || info->size() < 25 || !baseMinor || baseMinor->isEmpty())
+    // Operational controls remain available while the headset is wireless.
+    // Read them before optional metadata, and never issue the metadata commands
+    // undocked: affected Gen 4 firmware rejects 0x03 and can then time out.
+    if (!readSettings(&snapshot->settings, error))
         return false;
-    snapshot->baseFirmware = QStringLiteral("%1.%2")
-        .arg(readLe32(*info, 21)).arg(quint8((*baseMinor)[0]));
+    if (!snapshot->docked) {
+        if (snapshot->baseFirmware.isEmpty())
+            snapshot->baseFirmware = QStringLiteral("Cached when docked");
+        if (snapshot->headsetFirmware.isEmpty())
+            snapshot->headsetFirmware = QStringLiteral("Cached when docked");
+        return true;
+    }
 
-    const auto headsetMajor = request(A50Command::GetHeadsetFirmwareMajor, QByteArray(1, char(0x0a)), 1000, error);
-    const auto headsetMinor = request(A50Command::GetHeadsetFirmwareMinor, QByteArray(1, char(0x0a)), 1000, error);
+    QString metadataError;
+    const auto info = request(A50Command::GetDeviceInfo, {}, 1000, &metadataError);
+    const auto baseMinor = request(A50Command::GetBaseFirmwareMinor, {}, 1000, &metadataError);
+    if (info && info->size() >= 25 && baseMinor && !baseMinor->isEmpty()) {
+        snapshot->baseFirmware = QStringLiteral("%1.%2")
+            .arg(readLe32(*info, 21)).arg(quint8((*baseMinor)[0]));
+    } else if (snapshot->baseFirmware.isEmpty()) {
+        snapshot->baseFirmware = QStringLiteral("Unavailable while wireless");
+    }
+
+    const auto headsetMajor = request(A50Command::GetHeadsetFirmwareMajor,
+        QByteArray(1, char(0x0a)), 1000, &metadataError);
+    const auto headsetMinor = request(A50Command::GetHeadsetFirmwareMinor,
+        QByteArray(1, char(0x0a)), 1000, &metadataError);
     if (headsetMajor && headsetMajor->size() >= 4 && headsetMinor && !headsetMinor->isEmpty()) {
         snapshot->headsetFirmware = QStringLiteral("%1.%2")
             .arg(readLe32(*headsetMajor, 0)).arg(quint8((*headsetMinor)[0]));
     } else {
-        snapshot->headsetFirmware = QStringLiteral("Unavailable");
+        if (snapshot->headsetFirmware.isEmpty())
+            snapshot->headsetFirmware = QStringLiteral("Unavailable while wireless");
     }
 
-    return readSettings(&snapshot->settings, error);
+    return true;
 }
 
 bool A50Device::setActiveEqPreset(int preset, QString *error)

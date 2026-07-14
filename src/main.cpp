@@ -106,7 +106,7 @@ int main(int argc, char *argv[])
 {
     QApplication application(argc, argv);
     QApplication::setApplicationName(QStringLiteral("Astro Manager for Linux"));
-    QApplication::setApplicationVersion(QStringLiteral("0.4.0"));
+    QApplication::setApplicationVersion(QStringLiteral("0.4.1"));
     QApplication::setOrganizationName(QStringLiteral("AstroSpatial")); // Preserve 0.1 settings.
     QApplication::setDesktopFileName(QStringLiteral("io.github.drlolwat.AstroManager"));
     QApplication::setQuitOnLastWindowClosed(false);

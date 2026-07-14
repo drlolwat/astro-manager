@@ -158,13 +158,37 @@ public slots:
         }
 
         A50Snapshot current = m_snapshot;
-        const bool ok = forceFull ? m_device.readSnapshot(&current, &error)
-                                  : m_device.readDynamic(&current, &error);
+        bool ok = forceFull ? m_device.readSnapshot(&current, &error)
+                            : m_device.readDynamic(&current, &error);
         if (!ok) {
+            // The Gen 4 dock occasionally returns status 1 during the handoff
+            // from docked to wireless mode. Reclaiming interface 6 and retrying
+            // once keeps that transient from becoming a red disconnect loop.
             m_device.close();
-            disconnected(error);
-            return;
+            QThread::msleep(100);
+            QString retryError;
+            if (m_device.open(&retryError)) {
+                current = m_snapshot;
+                ok = forceFull ? m_device.readSnapshot(&current, &retryError)
+                               : m_device.readDynamic(&current, &retryError);
+            }
+            if (!ok) {
+                // Keep the last good snapshot through the short interval where
+                // the base switches between cradle and wireless control. Only
+                // call it disconnected after three consecutive poll failures.
+                ++m_readFailures;
+                if (m_readFailures >= 3)
+                    disconnected(retryError.isEmpty() ? error : retryError);
+                else {
+                    emit errorChanged({});
+                    if (m_snapshot.connected)
+                        emitState();
+                    setBusy(false);
+                }
+                return;
+            }
         }
+        m_readFailures = 0;
         m_snapshot = current;
         if (!m_hasDesired) {
             m_desired = current.settings;
@@ -202,7 +226,10 @@ public slots:
         if (m_busy)
             return;
         ++m_pollCount;
-        refresh(!m_device.isOpen() || m_pollCount % 5 == 0);
+        // A reclaimed interface only needs a quick dynamic probe when we
+        // already have a full snapshot. The periodic full refresh still runs
+        // every ten seconds and initial/reconnected discovery remains full.
+        refresh(!m_hasDesired || m_pollCount % 5 == 0);
     }
 
     void setSpatialActive(bool active)
@@ -541,11 +568,10 @@ private:
         if (!file.open(QIODevice::ReadOnly))
             return;
         const auto recovery = QJsonDocument::fromJson(file.readAll()).toVariant().toMap();
-        if (recovery.value(QStringLiteral("baseFirmware")).toString() != m_snapshot.baseFirmware
-            || recovery.value(QStringLiteral("headsetFirmware")).toString() != m_snapshot.headsetFirmware) {
-            QFile::remove(recoveryPath());
-            return;
-        }
+        // Firmware metadata is unavailable during wireless use on affected
+        // Gen 4 bases. The exact USB VID/PID already identifies the supported
+        // hardware, so metadata placeholders must not invalidate the crash
+        // journal that remembers the user's pre-DSP hardware gains.
         const int active = recovery.value(QStringLiteral("activeEqPreset")).toInt();
         const auto presets = recovery.value(QStringLiteral("presets")).toList();
         if (!A50Protocol::validPreset(active) || presets.size() != 3)
@@ -640,6 +666,7 @@ private:
     bool m_neutralized = false;
     bool m_auditioning = false;
     int m_pollCount = 0;
+    int m_readFailures = 0;
 };
 
 A50Manager::A50Manager(QObject *parent)
